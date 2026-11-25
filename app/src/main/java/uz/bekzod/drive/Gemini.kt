@@ -11,7 +11,7 @@ import org.json.JSONObject
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
-const val DEFAULT_MODEL = "gemini-flash-latest"
+const val DEFAULT_MODEL = "gemini-3.6-flash"
 
 /** Клиент Gemini API (бесплатный ключ из aistudio.google.com). */
 class Gemini(private val key: () -> String, private val model: () -> String) {
@@ -68,6 +68,8 @@ class Gemini(private val key: () -> String, private val model: () -> String) {
                 }
             }
         }
+        if (last is NoModel && last.message?.contains("401") == true)
+            throw IOException("Ключ Gemini не принят ни одной моделью. Создайте новый ключ на aistudio.google.com и вставьте в ⚙.")
         throw IOException("Серверы Gemini сейчас перегружены. Подождите минуту и повторите.\n(${last?.message})")
     }
 
@@ -93,7 +95,7 @@ class Gemini(private val key: () -> String, private val model: () -> String) {
                     when (r.code) {
                         429, 500, 503, 504 -> throw Busy("$m: ${r.code}")
                         404 -> throw NoModel("$m не найдена")
-                        401 -> throw IOException("Ключ Gemini не принят (401). Скопируйте ключ из aistudio.google.com заново целиком и вставьте в ⚙. ($msg)")
+                        401 -> throw NoModel("$m: ключ не подходит к этой модели (401)")
                         400, 403 -> throw IOException("Gemini: $msg")
                         else -> throw IOException("Gemini ${r.code}: $msg")
                     }
@@ -108,7 +110,7 @@ class Gemini(private val key: () -> String, private val model: () -> String) {
         }
 
     companion object {
-        val FALLBACKS = listOf("gemini-flash-lite-latest", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash")
+        val FALLBACKS = listOf("gemini-3.6-flash", "gemini-3.7-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-flash-latest", "gemini-flash-lite-latest")
     }
 }
 
