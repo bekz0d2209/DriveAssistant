@@ -45,7 +45,7 @@ class Gemini(private val key: () -> String, private val model: () -> String) {
     private class NoModel(msg: String) : IOException(msg)
 
     suspend fun generate(system: String, contents: JSONArray, tools: JSONArray?): JSONObject {
-        val k = key().trim()
+        val k = key().replace(Regex("[\\s\"'«»]"), "")
         if (k.isEmpty()) throw IOException("Не указан ключ Gemini. Нажмите ⚙ вверху и вставьте ключ.")
         val mine = model().trim().ifEmpty { DEFAULT_MODEL }
         val order = LinkedHashSet<String>()
@@ -93,6 +93,7 @@ class Gemini(private val key: () -> String, private val model: () -> String) {
                     when (r.code) {
                         429, 500, 503, 504 -> throw Busy("$m: ${r.code}")
                         404 -> throw NoModel("$m не найдена")
+                        401 -> throw IOException("Ключ Gemini не принят (401). Скопируйте ключ из aistudio.google.com заново целиком и вставьте в ⚙. ($msg)")
                         400, 403 -> throw IOException("Gemini: $msg")
                         else -> throw IOException("Gemini ${r.code}: $msg")
                     }

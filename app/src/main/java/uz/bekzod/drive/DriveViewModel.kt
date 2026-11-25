@@ -101,7 +101,7 @@ class DriveViewModel : ViewModel() {
     fun geminiModel() = prefs?.getString("gemini_model", DEFAULT_MODEL) ?: DEFAULT_MODEL
     fun rules() = prefs?.getString("rules", "") ?: ""
     fun saveSettings(key: String, model: String, rules: String) {
-        prefs?.edit()?.putString("gemini_key", key.trim())
+        prefs?.edit()?.putString("gemini_key", key.replace(Regex("[\\s\"'«»]"), ""))
             ?.putString("gemini_model", model.trim().ifEmpty { DEFAULT_MODEL })
             ?.putString("rules", rules.trim())?.apply()
         showSettings = false
