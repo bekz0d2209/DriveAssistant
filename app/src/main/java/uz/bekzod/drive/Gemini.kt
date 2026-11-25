@@ -38,11 +38,41 @@ class Gemini(private val key: () -> String, private val model: () -> String) {
         return sb.toString()
     }
 
-    suspend fun generate(system: String, contents: JSONArray, tools: JSONArray?): JSONObject =
+    /** Модель, которая последней ответила успешно (чтобы не переключаться туда-сюда). */
+    @Volatile private var working: String? = null
+
+    private class Busy(msg: String) : IOException(msg)
+    private class NoModel(msg: String) : IOException(msg)
+
+    suspend fun generate(system: String, contents: JSONArray, tools: JSONArray?): JSONObject {
+        val k = key().trim()
+        if (k.isEmpty()) throw IOException("Не указан ключ Gemini. Нажмите ⚙ вверху и вставьте ключ.")
+        val mine = model().trim().ifEmpty { DEFAULT_MODEL }
+        val order = LinkedHashSet<String>()
+        working?.let { order.add(it) }
+        order.add(mine)
+        order.addAll(FALLBACKS)
+        var last: IOException? = null
+        for (m in order) {
+            for (attempt in 0 until 2) {
+                try {
+                    val r = once(k, m, system, contents, tools)
+                    working = m
+                    return r
+                } catch (e: Busy) {
+                    last = e
+                    kotlinx.coroutines.delay(if (attempt == 0) 1500L else 3000L)
+                } catch (e: NoModel) {
+                    last = e
+                    break
+                }
+            }
+        }
+        throw IOException("Серверы Gemini сейчас перегружены. Подождите минуту и повторите.\n(${last?.message})")
+    }
+
+    private suspend fun once(k: String, m: String, system: String, contents: JSONArray, tools: JSONArray?): JSONObject =
         withContext(Dispatchers.IO) {
-            val k = key().trim()
-            if (k.isEmpty()) throw IOException("Не указан ключ Gemini. Нажмите ⚙ вверху и вставьте ключ.")
-            val m = model().trim().ifEmpty { DEFAULT_MODEL }
             val body = JSONObject()
                 .put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
                 .put("contents", contents)
@@ -60,14 +90,12 @@ class Gemini(private val key: () -> String, private val model: () -> String) {
                     } catch (e: Exception) {
                         s.take(200)
                     }
-                    throw IOException(
-                        when (r.code) {
-                            429 -> "Лимит бесплатных запросов Gemini. Подождите минуту и повторите."
-                            404 -> "Модель «$m» не найдена. Поменяйте модель в ⚙ настройках."
-                            400, 403 -> "Gemini: $msg"
-                            else -> "Gemini ${r.code}: $msg"
-                        }
-                    )
+                    when (r.code) {
+                        429, 500, 503, 504 -> throw Busy("$m: ${r.code}")
+                        404 -> throw NoModel("$m не найдена")
+                        400, 403 -> throw IOException("Gemini: $msg")
+                        else -> throw IOException("Gemini ${r.code}: $msg")
+                    }
                 }
                 val content = JSONObject(s).optJSONArray("candidates")
                     ?.optJSONObject(0)?.optJSONObject("content")
@@ -77,6 +105,10 @@ class Gemini(private val key: () -> String, private val model: () -> String) {
                 content
             }
         }
+
+    companion object {
+        val FALLBACKS = listOf("gemini-flash-lite-latest", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash")
+    }
 }
 
 object Tools {
