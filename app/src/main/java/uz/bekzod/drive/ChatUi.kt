@@ -349,6 +349,13 @@ private fun SettingsDialog(vm: DriveViewModel) {
                     label = { Text("Ключ Gemini API") }, singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                TextButton(
+                    enabled = !vm.checking && key.isNotBlank(),
+                    onClick = { vm.checkKey(key) { model = it } },
+                ) { Text(if (vm.checking) "Проверяю…" else "✔ Проверить ключ") }
+                vm.checkResult?.let {
+                    Text(it, fontSize = 13.sp, color = if (it.contains("✅")) Color(0xFF81C995) else Color(0xFFF28B82))
+                }
                 Spacer(Modifier.height(10.dp))
                 OutlinedTextField(
                     value = model, onValueChange = { model = it },

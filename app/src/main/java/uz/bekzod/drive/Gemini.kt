@@ -38,6 +38,43 @@ class Gemini(private val key: () -> String, private val model: () -> String) {
         return sb.toString()
     }
 
+    /** Проверить ключ: вернуть (ok, сообщение, лучшая модель). */
+    suspend fun check(rawKey: String): Triple<Boolean, String, String?> = withContext(Dispatchers.IO) {
+        val k = rawKey.replace(Regex("[\\s\"'«»]"), "")
+        if (k.isEmpty()) return@withContext Triple(false, "Ключ пустой", null)
+        val req = Request.Builder()
+            .url("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200")
+            .header("x-goog-api-key", k)
+            .get().build()
+        try {
+            client.newCall(req).execute().use { r ->
+                val s = r.body?.string() ?: ""
+                if (!r.isSuccessful) {
+                    val msg = try { JSONObject(s).getJSONObject("error").getString("message") } catch (e: Exception) { s.take(150) }
+                    return@withContext Triple(false, "Google не принял ключ (${r.code}): $msg\nКлюч начинается на «${k.take(4)}», длина ${k.length}.", null)
+                }
+                val arr = JSONObject(s).optJSONArray("models") ?: JSONArray()
+                val names = mutableListOf<String>()
+                for (i in 0 until arr.length()) {
+                    val o = arr.getJSONObject(i)
+                    val methods = o.optJSONArray("supportedGenerationMethods")?.toString() ?: ""
+                    if (methods.contains("generateContent")) names.add(o.optString("name").removePrefix("models/"))
+                }
+                val flash = names.filter {
+                    it.contains("flash") && !it.contains("tts") && !it.contains("image") && !it.contains("live") &&
+                        !it.contains("audio") && !it.contains("preview") && !it.contains("exp")
+                }
+                val best = flash.firstOrNull { it == "gemini-3.6-flash" }
+                    ?: flash.filter { !it.contains("lite") }.maxOrNull()
+                    ?: flash.maxOrNull()
+                    ?: names.firstOrNull()
+                Triple(true, "Ключ рабочий ✅ Доступно моделей: ${names.size}. Выбрана: $best", best)
+            }
+        } catch (e: Exception) {
+            Triple(false, "Нет связи с Google: ${e.message}", null)
+        }
+    }
+
     /** Модель, которая последней ответила успешно (чтобы не переключаться туда-сюда). */
     @Volatile private var working: String? = null
 

@@ -100,6 +100,20 @@ class DriveViewModel : ViewModel() {
     fun geminiKey() = prefs?.getString("gemini_key", "") ?: ""
     fun geminiModel() = prefs?.getString("gemini_model", DEFAULT_MODEL) ?: DEFAULT_MODEL
     fun rules() = prefs?.getString("rules", "") ?: ""
+    var checkResult by mutableStateOf<String?>(null)
+    var checking by mutableStateOf(false)
+        private set
+
+    fun checkKey(key: String, onModel: (String) -> Unit) {
+        viewModelScope.launch {
+            checking = true
+            checkResult = null
+            val (_, msg, best) = gemini.check(key)
+            checkResult = msg
+            if (best != null) onModel(best)
+            checking = false
+        }
+    }
     fun saveSettings(key: String, model: String, rules: String) {
         prefs?.edit()?.putString("gemini_key", key.replace(Regex("[\\s\"'«»]"), ""))
             ?.putString("gemini_model", model.trim().ifEmpty { DEFAULT_MODEL })
