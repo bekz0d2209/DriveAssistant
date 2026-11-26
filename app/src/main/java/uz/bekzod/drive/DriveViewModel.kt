@@ -170,6 +170,7 @@ class DriveViewModel : ViewModel() {
             } finally {
                 thinking = false
                 filesStale = true
+                rootFoldersAt = 0L
             }
         }
     }
@@ -201,12 +202,28 @@ class DriveViewModel : ViewModel() {
         }
     }
 
+    private var rootFolders: String = ""
+    private var rootFoldersAt = 0L
+
+    private suspend fun rootFolderList(): String {
+        val a = api ?: return ""
+        if (System.currentTimeMillis() - rootFoldersAt < 120_000 && rootFoldersAt > 0) return rootFolders
+        return try {
+            rootFolders = a.list("root").filter { it.isFolder }.joinToString(", ") { it.name }.ifEmpty { "(папок нет)" }
+            rootFoldersAt = System.currentTimeMillis()
+            rootFolders
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
     private suspend fun runAgent() {
         val touched = linkedMapOf<String, DriveFile>()
         val today = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault()).format(Date())
+        val folders = rootFolderList()
         repeat(10) {
             trimHistory()
-            val content = gemini.generate(Tools.system(today, rules()), JSONArray(history), Tools.declarations)
+            val content = gemini.generate(Tools.system(today, rules(), folders), JSONArray(history), Tools.declarations)
             history.add(content)
             val parts = content.optJSONArray("parts") ?: JSONArray()
             val calls = mutableListOf<JSONObject>()

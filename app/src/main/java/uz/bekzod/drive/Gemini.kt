@@ -110,12 +110,40 @@ class Gemini(private val key: () -> String, private val model: () -> String) {
         throw IOException("Серверы Gemini сейчас перегружены. Подождите минуту и повторите.\n(${last?.message})")
     }
 
-    private suspend fun once(k: String, m: String, system: String, contents: JSONArray, tools: JSONArray?): JSONObject =
+    /** Модели, которые не приняли настройку «меньше думать» — для них её не шлём. */
+    private val noThinkCfg = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
+    private fun thinkingConfig(m: String): JSONObject? = when {
+        m in noThinkCfg -> null
+        m.startsWith("gemini-2.5") && !m.contains("pro") -> JSONObject().put("thinkingBudget", 0)
+        m.startsWith("gemini-2") -> null
+        else -> JSONObject().put("thinkingLevel", "low")
+    }
+
+    private suspend fun once(k: String, m: String, system: String, contents: JSONArray, tools: JSONArray?): JSONObject {
+        try {
+            return onceRaw(k, m, system, contents, tools, thinkingConfig(m))
+        } catch (e: IOException) {
+            val msg = e.message ?: ""
+            if (e !is Busy && e !is NoModel && thinkingConfig(m) != null &&
+                (msg.contains("thinking", true) || msg.contains("Invalid", true) || msg.contains("Unknown name", true))
+            ) {
+                noThinkCfg.add(m)
+                return onceRaw(k, m, system, contents, tools, null)
+            }
+            throw e
+        }
+    }
+
+    private suspend fun onceRaw(
+        k: String, m: String, system: String, contents: JSONArray, tools: JSONArray?, think: JSONObject?,
+    ): JSONObject =
         withContext(Dispatchers.IO) {
             val body = JSONObject()
                 .put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
                 .put("contents", contents)
             if (tools != null) body.put("tools", JSONArray().put(JSONObject().put("functionDeclarations", tools)))
+            if (think != null) body.put("generationConfig", JSONObject().put("thinkingConfig", think))
             val req = Request.Builder()
                 .url("https://generativelanguage.googleapis.com/v1beta/models/$m:generateContent")
                 .header("x-goog-api-key", k)
@@ -152,7 +180,7 @@ class Gemini(private val key: () -> String, private val model: () -> String) {
 }
 
 object Tools {
-    fun system(today: String, rules: String) = """
+    fun system(today: String, rules: String, folders: String = "") = """
 Ты — ИИ-помощник Бекзода по документам. Все файлы лежат на его Google Диске.
 Отвечай коротко и по делу, на языке пользователя (русский или узбекский).
 Действуй сам через функции, не спрашивай лишнего. Сегодня $today.
@@ -169,7 +197,7 @@ object Tools {
 - Ты умеешь читать PDF и фото. Прикреплённые файлы ты видишь прямо в сообщении. Файлы на Диске читай через read_file.
 - Номер вагона обычно 8 цифр. Если пользователь просит переименовать по данным из документа — сначала прочитай его.
 - После действий кратко скажи, что сделано.
-""".trimIndent() + (if (rules.isNotBlank()) "\n\nПравила пользователя (выполняй всегда):\n$rules" else "")
+""".trimIndent() + (if (folders.isNotBlank()) "\n\nПапки в корне Диска сейчас: $folders\n(Используй этот список, не вызывай list_folder(\"\") без нужды.)" else "") + (if (rules.isNotBlank()) "\n\nПравила пользователя (выполняй всегда):\n$rules" else "")
 
     val declarations: JSONArray get() = JSONArray(DECL)
 
